@@ -25,8 +25,8 @@ pi install /path/to/pi-guide
 ```
 You:  /guide:on
   ┌─ Where should the guideline be saved? ─────────────────┐
-  │  ○ Project scope  (.pi/guide.json)                     │
-  │  ● Global scope   (~/.pi/guide.json)                   │
+  │  ○ Project scope  (.pi/agent/guide.json)               │
+  │  ● Global scope   (~/.pi/agent/guide.json)             │
   └────────────────────────────────────────────────────────┘
 
   ┌─ Enter your custom guideline: ─────────────────────────┐
@@ -49,8 +49,8 @@ Config supports two levels with fallback:
 
 | Scope | Path | Behavior |
 |---|---|---|
-| **Global** | `~/.pi/guide.json` | Fallback base — applies to all projects |
-| **Project** | `<project>/.pi/guide.json` | Overrides global — always wins if present |
+| **Global** | `~/.pi/agent/guide.json` | Fallback base — applies to all projects |
+| **Project** | `<project>/.pi/agent/guide.json` | Overrides global — always wins if present |
 
 **Load order:** project → global → defaults.
 **Save:** `/guide:on` saves to the scope you choose. `/guide:off` saves to
@@ -58,9 +58,9 @@ the scope that was active at load time.
 
 ### Use cases
 
-- Set a universal guideline in `~/.pi/guide.json` for all projects.
+- Set a universal guideline in `~/.pi/agent/guide.json` for all projects.
 - Override it per project by running `/guide:on` and picking project scope.
-- Delete the project `.pi/guide.json` to fall back to the global one.
+- Delete the project `.pi/agent/guide.json` to fall back to the global one.
 
 ## How it works
 

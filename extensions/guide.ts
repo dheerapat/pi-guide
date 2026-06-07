@@ -3,8 +3,8 @@
  *
  * Injects a user-defined guideline into every LLM turn's system prompt.
  * Config supports two scopes with fallback:
- *   Global  — ~/.pi/guide.json  (fallback base)
- *   Project — <cwd>/.pi/guide.json (overrides global)
+ *   Global  — ~/.pi/agent/guide.json  (fallback base)
+ *   Project — <cwd>/.pi/agent/guide.json (overrides global)
  *
  * Commands:
  *   /guide:on   — Interactive: choose scope, then enter guideline text
@@ -28,11 +28,11 @@ interface Config {
 type Scope = "project" | "global";
 
 function globalConfigPath(): string {
-  return join(homedir(), ".pi", "guide.json");
+  return join(homedir(), ".pi", "agent", "guide.json");
 }
 
 function projectConfigPath(cwd: string): string {
-  return resolve(cwd, ".pi", "guide.json");
+  return resolve(cwd, ".pi", "agent", "guide.json");
 }
 
 function configPathFor(scope: Scope, cwd: string): string {
@@ -120,8 +120,8 @@ export default function (pi: ExtensionAPI) {
 
       // 1. Choose scope
       const scopeLabels = [
-        { value: "project" as Scope, label: `Project scope  (.pi/guide.json)` },
-        { value: "global" as Scope, label: `Global scope   (~/.pi/guide.json)` },
+        { value: "project" as Scope, label: `Project scope  (.pi/agent/guide.json)` },
+        { value: "global" as Scope, label: `Global scope   (~/.pi/agent/guide.json)` },
       ];
       const chosenScope = await ctx.ui.select(
         "Where should the guideline be saved?",
