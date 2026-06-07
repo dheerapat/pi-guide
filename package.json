@@ -1,0 +1,18 @@
+{
+  "name": "pi-guide",
+  "version": "1.0.0",
+  "description": "pi-guide — custom guideline injection for pi — append your own instructions to every LLM turn",
+  "keywords": ["pi-package"],
+  "devDependencies": {
+    "typescript": "^5.7"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": ["./extensions"]
+  }
+}
