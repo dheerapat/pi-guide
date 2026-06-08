@@ -64,7 +64,19 @@ the scope that was active at load time.
 
 ## How it works
 
-- On every LLM turn, the guideline is appended to pi's system prompt via
-  the `before_agent_start` event.
-- The guideline is **added after** pi's own system prompt — all built-in
-  instructions, tools, and skills remain intact.
+- The extension listens to pi's `before_agent_start` event, which fires
+  **every time you send a message** — not just at session start.
+- On each turn, pi freshly assembles the system prompt (context files,
+  skills, tools, etc.) and passes it through `before_agent_start`, where
+  the guideline is appended **after** pi's own prompt — so nothing built-in
+  is lost.
+- The system prompt is a side-channel alongside the conversation history,
+  not a message in it. On every LLM call the LLM sees:
+
+  ```
+  System: [pi prompt + your guideline]
+  Messages: [previous conversation...]
+  Your new message
+  ```
+
+  The guideline is always present, even after compaction or branching.
