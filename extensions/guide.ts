@@ -91,6 +91,13 @@ export default function (pi: ExtensionAPI) {
     const loaded = loadConfig(ctx.cwd);
     config = loaded.config;
     activeScope = loaded.scope;
+
+    if (config.enabled) {
+      ctx.ui.setStatus(
+        "pi-guide",
+        ctx.ui.theme.fg("success", "●") + " Guide",
+      );
+    }
   });
 
   // --- Persist config on shutdown (covers quit / reload / switch) ---
@@ -99,8 +106,14 @@ export default function (pi: ExtensionAPI) {
   });
 
   // --- Inject guideline into system prompt ---
-  pi.on("before_agent_start", async (event) => {
+  pi.on("before_agent_start", async (event, ctx) => {
     if (!config.enabled || !config.text) return;
+
+    // Ensure status indicator is visible (in case it was cleared externally)
+    ctx.ui.setStatus(
+      "pi-guide",
+      ctx.ui.theme.fg("success", "●") + " Guide",
+    );
 
     return {
       systemPrompt: `${event.systemPrompt}\n\n## Custom Guideline\n\n${config.text}`,
@@ -131,8 +144,11 @@ export default function (pi: ExtensionAPI) {
 
       const scope = scopeLabels.find((s) => s.label === chosenScope)!.value;
 
-      // 2. Enter guideline text
-      const text = await ctx.ui.input("Enter your custom guideline:");
+      // 2. Enter guideline text (multiline editor — paste your prompt with newlines)
+      const text = await ctx.ui.editor(
+        "Enter your custom guideline:",
+        config.text,
+      );
       if (!text) return; // user cancelled
 
       // 3. Save and enable
@@ -140,6 +156,11 @@ export default function (pi: ExtensionAPI) {
       config.enabled = true;
       activeScope = scope;
       saveConfig(scope, ctx.cwd, config);
+
+      ctx.ui.setStatus(
+        "pi-guide",
+        ctx.ui.theme.fg("success", "●") + " Guide",
+      );
 
       ctx.ui.notify(
         `✓ Guideline saved to ${scope} scope and enabled`,
@@ -156,6 +177,8 @@ export default function (pi: ExtensionAPI) {
     handler: async (_args, ctx) => {
       config.enabled = false;
       saveConfig(activeScope, ctx.cwd, config);
+
+      ctx.ui.setStatus("pi-guide", undefined);
 
       const label = activeScope === "project" ? "project" : "global";
       ctx.ui.notify(`✕ Guideline injection disabled (${label} scope)`, "info");
