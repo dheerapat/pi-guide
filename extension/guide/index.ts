@@ -82,6 +82,14 @@ function saveConfig(scope: Scope, cwd: string, config: Config): void {
 // Extension
 // ---------------------------------------------------------------------------
 
+function guideStatusText(theme: any, scope: Scope, enabled: boolean): string {
+  if (!enabled) {
+    return theme.fg("error", "●") + " Guide";
+  }
+  const label = scope === "project" ? "Local" : "Global";
+  return theme.fg("success", "●") + ` ${label} guide`;
+}
+
 export default function (pi: ExtensionAPI) {
   let config: Config = { enabled: false, text: "" };
   let activeScope: Scope = "project";
@@ -92,12 +100,10 @@ export default function (pi: ExtensionAPI) {
     config = loaded.config;
     activeScope = loaded.scope;
 
-    if (config.enabled) {
-      ctx.ui.setStatus(
-        "pi-guide",
-        ctx.ui.theme.fg("success", "●") + " Guide",
-      );
-    }
+    ctx.ui.setStatus(
+      "pi-guide",
+      guideStatusText(ctx.ui.theme, activeScope, config.enabled),
+    );
   });
 
   // --- Persist config on shutdown (covers quit / reload / switch) ---
@@ -112,7 +118,7 @@ export default function (pi: ExtensionAPI) {
     // Ensure status indicator is visible (in case it was cleared externally)
     ctx.ui.setStatus(
       "pi-guide",
-      ctx.ui.theme.fg("success", "●") + " Guide",
+      guideStatusText(ctx.ui.theme, activeScope, config.enabled),
     );
 
     return {
@@ -159,7 +165,7 @@ export default function (pi: ExtensionAPI) {
 
       ctx.ui.setStatus(
         "pi-guide",
-        ctx.ui.theme.fg("success", "●") + " Guide",
+        guideStatusText(ctx.ui.theme, scope, true),
       );
 
       ctx.ui.notify(
@@ -178,7 +184,10 @@ export default function (pi: ExtensionAPI) {
       config.enabled = false;
       saveConfig(activeScope, ctx.cwd, config);
 
-      ctx.ui.setStatus("pi-guide", undefined);
+      ctx.ui.setStatus(
+        "pi-guide",
+        guideStatusText(ctx.ui.theme, activeScope, false),
+      );
 
       const label = activeScope === "project" ? "project" : "global";
       ctx.ui.notify(`✕ Guideline injection disabled (${label} scope)`, "info");
