@@ -7,7 +7,7 @@ into every LLM turn's system prompt — after pi's own prompt, so nothing is los
 
 ```bash
 # From a git remote
-pi install git:github.com/<you>/pi-guide
+pi install git:github.com/dheerapat/pi-guide
 
 # Or directly from a local clone
 pi install /path/to/pi-guide
