@@ -86,8 +86,8 @@ function guideStatusText(theme: any, scope: Scope, enabled: boolean): string {
   if (!enabled) {
     return theme.fg("error", "●") + " Guide";
   }
-  const label = scope === "project" ? "Local" : "Global";
-  return theme.fg("success", "●") + ` ${label} guide`;
+  const label = scope === "project" ? "local" : "global";
+  return theme.fg("success", "●") + ` Guide (${label})`;
 }
 
 export default function (pi: ExtensionAPI) {
