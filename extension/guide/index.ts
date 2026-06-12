@@ -32,7 +32,7 @@ function globalConfigPath(): string {
 }
 
 function projectConfigPath(cwd: string): string {
-  return resolve(cwd, ".pi", "agent", "guide.json");
+  return resolve(cwd, ".pi", "guide.json");
 }
 
 function configPathFor(scope: Scope, cwd: string): string {
@@ -139,7 +139,7 @@ export default function (pi: ExtensionAPI) {
 
       // 1. Choose scope
       const scopeLabels = [
-        { value: "project" as Scope, label: `Project scope  (.pi/agent/guide.json)` },
+        { value: "project" as Scope, label: `Project scope  (.pi/guide.json)` },
         { value: "global" as Scope, label: `Global scope   (~/.pi/agent/guide.json)` },
       ];
       const chosenScope = await ctx.ui.select(
