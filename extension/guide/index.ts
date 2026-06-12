@@ -93,12 +93,15 @@ function guideStatusText(theme: any, scope: Scope, enabled: boolean): string {
 export default function (pi: ExtensionAPI) {
   let config: Config = { enabled: false, text: "" };
   let activeScope: Scope = "project";
+  /** Only persist to disk when the user explicitly changes something. */
+  let dirty = false;
 
   // --- Restore config on session start ---
   pi.on("session_start", async (_event, ctx) => {
     const loaded = loadConfig(ctx.cwd);
     config = loaded.config;
     activeScope = loaded.scope;
+    dirty = false;
 
     ctx.ui.setStatus(
       "pi-guide",
@@ -106,8 +109,9 @@ export default function (pi: ExtensionAPI) {
     );
   });
 
-  // --- Persist config on shutdown (covers quit / reload / switch) ---
+  // --- Persist config on shutdown only if the user changed it ---
   pi.on("session_shutdown", async (_event, ctx) => {
+    if (!dirty) return;
     saveConfig(activeScope, ctx.cwd, config);
   });
 
@@ -161,6 +165,7 @@ export default function (pi: ExtensionAPI) {
       config.text = text;
       config.enabled = true;
       activeScope = scope;
+      dirty = true;
       saveConfig(scope, ctx.cwd, config);
 
       ctx.ui.setStatus(
@@ -182,6 +187,7 @@ export default function (pi: ExtensionAPI) {
     description: "Disable custom guideline injection",
     handler: async (_args, ctx) => {
       config.enabled = false;
+      dirty = true;
       saveConfig(activeScope, ctx.cwd, config);
 
       ctx.ui.setStatus(
