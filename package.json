@@ -1,6 +1,6 @@
 {
   "name": "pi-guide",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "pi-guide — custom guideline injection for pi — append your own instructions to every LLM turn",
   "keywords": [
     "pi-package"
