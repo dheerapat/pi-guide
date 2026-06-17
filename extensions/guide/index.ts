@@ -444,6 +444,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       switchScope(scope);
+      markDirty(); // ensure dirty even when scope didn't change
       flushDirty(ctx.cwd);
 
       ctx.ui.setStatus(
