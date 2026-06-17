@@ -208,10 +208,31 @@ function activeConfig(): Config | undefined {
   return undefined;
 }
 
-/** Mark the active scope dirty and persist. */
+/** Mark the active scope dirty. */
 function markDirty(): void {
   if (activeScope === "project") dirtyProject = true;
   else dirtyGlobal = true;
+}
+
+/**
+ * Switch active scope with mutual exclusion: disable the old scope, enable
+ * the new one. This ensures only one scope is enabled at a time, so
+ * loadConfigs picks the correct one on next session.
+ */
+function switchScope(to: Scope): void {
+  if (activeScope === to) return;
+  // Disable old scope
+  const oldCfg = activeScope === "project" ? projectConfig : globalConfig;
+  if (oldCfg) oldCfg.enabled = false;
+  dirtyProject = dirtyProject || activeScope === "project";
+  dirtyGlobal = dirtyGlobal || activeScope === "global";
+  // Switch
+  activeScope = to;
+  // Enable new scope
+  const newCfg = to === "project" ? projectConfig : globalConfig;
+  if (newCfg) newCfg.enabled = true;
+  dirtyProject = dirtyProject || to === "project";
+  dirtyGlobal = dirtyGlobal || to === "global";
 }
 
 /** Persist a scope's config to disk, stripping built-in names from global saves. */
@@ -413,24 +434,17 @@ export default function (pi: ExtensionAPI) {
       // 4. Save and enable for the chosen scope
       if (scope === "project") {
         if (!projectConfig) {
-          projectConfig = { enabled: true, active: pickedName, guidelines: {} };
+          projectConfig = { enabled: false, active: pickedName, guidelines: {} };
         }
         projectConfig.guidelines[pickedName] = text;
         projectConfig.active = pickedName;
-        projectConfig.enabled = true;
-        dirtyProject = true;
       } else {
         globalConfig.guidelines[pickedName] = text;
         globalConfig.active = pickedName;
-        globalConfig.enabled = true;
-        dirtyGlobal = true;
       }
 
-      activeScope = scope;
-      // Persist immediately (not waiting for shutdown)
-      saveConfig(scope, ctx.cwd, configFor(scope)!);
-      if (scope === "project") dirtyProject = false;
-      else dirtyGlobal = false;
+      switchScope(scope);
+      flushDirty(ctx.cwd);
 
       ctx.ui.setStatus(
         "pi-guide",
@@ -486,9 +500,8 @@ export default function (pi: ExtensionAPI) {
           );
         } else if (inOther) {
           const oldScope = activeScope;
-          activeScope = otherScope;
+          switchScope(otherScope);
           otherCfg!.active = argName;
-          otherCfg!.enabled = true;
           markDirty();
           flushDirty(ctx.cwd);
           ctx.ui.notify(
@@ -556,9 +569,8 @@ export default function (pi: ExtensionAPI) {
           return;
         }
 
-        activeScope = scope;
+        switchScope(scope);
         scopeCfg.active = name;
-        scopeCfg.enabled = true;
         markDirty();
         flushDirty(ctx.cwd);
         ctx.ui.notify(
@@ -594,9 +606,8 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      activeScope = scope;
+      switchScope(scope);
       scopeCfg.active = pickedName;
-      scopeCfg.enabled = true;
       markDirty();
       flushDirty(ctx.cwd);
 
