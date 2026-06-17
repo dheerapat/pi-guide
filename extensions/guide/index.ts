@@ -613,11 +613,11 @@ export default function (pi: ExtensionAPI) {
   });
 
   // -----------------------------------------------------------------------
-  // /guide:delete  —  delete a user-created guideline from the active scope
+  // /guide:delete  —  delete a user-created guideline (any scope)
   // -----------------------------------------------------------------------
   pi.registerCommand("guide:delete", {
     description:
-      "Delete a user-created guideline from the active scope. Built-ins cannot be deleted.",
+      "Delete a user-created guideline. Shows deletable guidelines from all scopes.",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) {
         ctx.ui.notify("/guide:delete requires an interactive terminal.", "error");
@@ -635,98 +635,114 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const scopeCfg = configFor(activeScope);
-      if (!scopeCfg) {
+      // Collect deletable entries from both scopes: { name, scope, config }
+      type Deletable = { name: string; scope: Scope; cfg: Config };
+      const deletables: Deletable[] = [];
+
+      const addFromScope = (scope: Scope, cfg: Config | undefined) => {
+        if (!cfg) return;
+        for (const name of Object.keys(cfg.guidelines)) {
+          if (!isBuiltin(name)) {
+            deletables.push({ name, scope, cfg });
+          }
+        }
+      };
+      addFromScope("project", projectConfig);
+      addFromScope("global", globalConfig);
+
+      if (deletables.length === 0) {
         ctx.ui.notify(
-          `No config loaded for ${activeScope} scope.`,
-          "error",
+          "No user-created guidelines to delete. Built-in guidelines cannot be removed.",
+          "warning",
         );
         return;
       }
 
-      const userNames = Object.keys(scopeCfg.guidelines).filter(
-        (n) => !isBuiltin(n),
-      );
+      // Resolve which entry to delete
+      let picked: Deletable;
 
-      if (userNames.length === 0) {
-        if (activeScope === "global") {
-          ctx.ui.notify(
-            "No user-created guidelines in global scope. Built-in guidelines cannot be deleted.",
-            "warning",
+      if (argName) {
+        const matches = deletables.filter((d) => d.name === argName);
+        if (matches.length === 1) {
+          picked = matches[0];
+        } else if (matches.length > 1) {
+          // Same name exists in both scopes — ask which one
+          const options = matches.map(
+            (d) => `  ${d.name} (${d.scope} scope)`,
           );
+          const chosen = await ctx.ui.select(
+            `"${argName}" exists in multiple scopes. Which one?`,
+            options,
+          );
+          if (!chosen) return;
+          picked = matches[options.indexOf(chosen)];
         } else {
           ctx.ui.notify(
-            "No user-created guidelines in project scope. Use /guide:create to add one first.",
+            `No deletable guideline named "${argName}" found.`,
             "warning",
           );
+          return;
         }
-        return;
-      }
-
-      let pickedName: string;
-
-      if (argName && userNames.includes(argName)) {
-        // Direct name lookup — found in current scope
-        pickedName = argName;
       } else {
-        // No name, or name not found — show selector
-        if (argName) {
-          ctx.ui.notify(
-            `Guideline "${argName}" not found in ${activeScope} scope. Showing deletable guidelines.`,
-            "warning",
-          );
-        }
-        const options = userNames.map((n) =>
+        // Show all deletable guidelines with scope labels
+        const options = deletables.map((d) =>
           guidelineLabel(
-            n,
-            scopeCfg.guidelines[n],
-            n === scopeCfg.active,
+            d.name,
+            d.cfg.guidelines[d.name],
+            d.scope === activeScope && d.name === d.cfg.active,
             false,
-          ),
+          ) + `  [${d.scope}]`,
         );
         const chosen = await ctx.ui.select(
-          `Choose guideline to delete from ${activeScope} scope:`,
+          "Choose guideline to delete:",
           options,
         );
         if (!chosen) return;
-
-        pickedName = userNames[options.indexOf(chosen)];
+        picked = deletables[options.indexOf(chosen)];
       }
 
-      const wasActive = pickedName === scopeCfg.active;
-      delete scopeCfg.guidelines[pickedName];
+      // Perform deletion
+      const wasActiveScope = picked.scope === activeScope;
+      const wasActive = picked.name === picked.cfg.active;
+      delete picked.cfg.guidelines[picked.name];
 
-      // If we deleted the active guideline, pick the first remaining or disable
       if (wasActive) {
-        const remaining = Object.keys(scopeCfg.guidelines);
+        const remaining = Object.keys(picked.cfg.guidelines);
         if (remaining.length > 0) {
-          scopeCfg.active = remaining[0];
+          picked.cfg.active = remaining[0];
         } else {
-          scopeCfg.enabled = false;
+          picked.cfg.enabled = false;
         }
       }
 
-      markDirty();
+      // Mark dirty for the affected scope
+      if (picked.scope === "project") dirtyProject = true;
+      else dirtyGlobal = true;
       flushDirty(ctx.cwd);
 
-      ctx.ui.setStatus(
-        "pi-guide",
-        guideStatusText(ctx.ui.theme, activeScope, activeConfig()),
-      );
+      // If we deleted from the active scope, update status. If we deleted from
+      // the other scope, status stays the same.
+      if (wasActiveScope) {
+        ctx.ui.setStatus(
+          "pi-guide",
+          guideStatusText(ctx.ui.theme, activeScope, activeConfig()),
+        );
+      }
 
-      if (wasActive && !scopeCfg.enabled) {
+      // Build notification
+      if (wasActive && !picked.cfg.enabled) {
         ctx.ui.notify(
-          `✓ Deleted "${pickedName}" (was active — injection disabled for ${activeScope} scope)`,
+          `✓ Deleted "${picked.name}" (was active — injection disabled for ${picked.scope} scope)`,
           "info",
         );
       } else if (wasActive) {
         ctx.ui.notify(
-          `✓ Deleted "${pickedName}". Switched to "${scopeCfg.active}".`,
+          `✓ Deleted "${picked.name}". Switched to "${picked.cfg.active}" (${picked.scope} scope).`,
           "info",
         );
       } else {
         ctx.ui.notify(
-          `✓ Deleted "${pickedName}" from ${activeScope} scope.`,
+          `✓ Deleted "${picked.name}" from ${picked.scope} scope.`,
           "info",
         );
       }

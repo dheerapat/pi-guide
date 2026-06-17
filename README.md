@@ -21,7 +21,7 @@ pi install /path/to/pi-guide
 ```
 /guide:create — Interactive: choose scope, then create or edit a guideline
 /guide:use    — Switch active guideline & scope (selector with previews)
-/guide:delete — Delete a user-created guideline from the active scope
+/guide:delete — Delete a user-created guideline (from any scope)
 /guide:off    — Disable injection (active scope)
 ```
 
@@ -120,8 +120,8 @@ Each scope stores its own config independently. Built-ins only exist in global s
 2. Else global config enabled → global scope active
 3. Else → injection off
 
-`/guide:use` lets you switch between scopes at any time. `create`, `delete`, and
-`off` operate on whichever scope you pick (or the active scope).
+`/guide:use` lets you switch between scopes at any time. `create` and `off` operate on whichever scope you pick (or the active scope).
+`delete` shows deletable guidelines from **all scopes** so you can clean up anywhere.
 
 ### Use cases
 
