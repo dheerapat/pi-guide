@@ -615,6 +615,7 @@ export default function (pi: ExtensionAPI) {
 
         switchScope(scope);
         scopeCfg.active = name;
+        scopeCfg.enabled = true;
         markDirty();
         flushDirty(ctx.cwd);
         ctx.ui.notify(
@@ -652,6 +653,7 @@ export default function (pi: ExtensionAPI) {
 
       switchScope(scope);
       scopeCfg.active = pickedName;
+      scopeCfg.enabled = true;
       markDirty();
       flushDirty(ctx.cwd);
 
