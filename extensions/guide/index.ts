@@ -527,7 +527,7 @@ export default function (pi: ExtensionAPI) {
         const inOther = otherCfg && otherCfg.guidelines[argName];
 
         if (inCurrent) {
-          if (argName === currentCfg!.active) {
+          if (argName === currentCfg!.active && currentCfg!.enabled) {
             ctx.ui.notify(
               `✓ Guideline "${argName}" is already active (${activeScope} scope).`,
               "info",
@@ -605,7 +605,7 @@ export default function (pi: ExtensionAPI) {
       if (names.length === 1) {
         // Only one — use it directly
         const name = names[0];
-        if (scope === activeScope && name === scopeCfg.active) {
+        if (scope === activeScope && name === scopeCfg.active && scopeCfg.enabled) {
           ctx.ui.notify(
             `✓ Guideline "${name}" is already active (${scope} scope).`,
             "info",
@@ -642,7 +642,7 @@ export default function (pi: ExtensionAPI) {
 
       const pickedName = names[options.indexOf(chosen)];
 
-      if (scope === activeScope && pickedName === scopeCfg.active) {
+      if (scope === activeScope && pickedName === scopeCfg.active && scopeCfg.enabled) {
         ctx.ui.notify(
           `✓ Guideline "${pickedName}" is already active.`,
           "info",
