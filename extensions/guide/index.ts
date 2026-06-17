@@ -87,18 +87,20 @@ function configPathFor(scope: Scope, cwd: string): string {
  *   { enabled: true, text: "..." }
  *   → { enabled: true, active: "default", guidelines: { default: "..." } }
  */
+/**
+ * Normalize raw JSON into a Config shape. Does NOT validate active against
+ * guidelines — downstream builders (buildGlobalConfig / buildProjectConfig)
+ * handle validation after their respective merges. This is critical because
+ * global scope may have active pointing to a built-in that isn't in the
+ * persisted guidelines map.
+ */
 function normalizeConfig(raw: Record<string, unknown>): Config {
   // Already in new format
   if (raw.guidelines && typeof raw.guidelines === "object") {
-    const guidelines = raw.guidelines as Record<string, string>;
-    const active =
-      typeof raw.active === "string" && guidelines[raw.active]
-        ? raw.active
-        : Object.keys(guidelines)[0] ?? "default";
     return {
       enabled: Boolean(raw.enabled),
-      active,
-      guidelines,
+      active: typeof raw.active === "string" ? raw.active : "default",
+      guidelines: raw.guidelines as Record<string, string>,
     };
   }
 
