@@ -4,15 +4,18 @@
  * Injects a user-defined guideline into every LLM turn's system prompt.
  * Supports multiple named guidelines with quick switching via selector.
  *
- * Config supports two scopes with fallback:
- *   Global  — ~/.pi/agent/guide.json  (fallback base)
- *   Project — <cwd>/.pi/guide.json    (overrides global)
+ * Config supports two scopes:
+ *   Global  — ~/.pi/agent/guide.json  (built-ins + user guidelines)
+ *   Project — <cwd>/.pi/guide.json    (user guidelines only, no built-ins)
+ *
+ * Built-in guides are shipped as .md files in builtins/ and are always
+ * available under global scope. They are never editable or deletable.
  *
  * Commands:
- *   /guide:on   — Interactive: choose/create/edit a guideline
- *   /guide:off  — Disable injection
- *   /guide:use  — Switch active guideline (selector with previews)
- *   /guide:delete — Delete a user-created guideline
+ *   /guide:create — Interactive: choose scope, create/edit a guideline
+ *   /guide:off    — Disable injection (current scope)
+ *   /guide:use    — Switch active guideline & scope (selector with previews)
+ *   /guide:delete — Delete a user-created guideline from the active scope
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -118,40 +121,123 @@ function tryReadJson(path: string): Config | undefined {
 }
 
 /**
- * Load config with fallback: project → global → default.
- * Also returns which scope the config came from.
- *
- * Project scope always wins if the file exists, regardless of its
- * enabled/text values. This lets you explicitly disable injection
- * for a project even when a global guideline is set.
- *
- * Built-in guides are always merged in (user-created ones override).
+ * Build the global config by merging built-ins underneath user guidelines.
+ * Built-ins provide the foundation; user-created guidelines with the same name
+ * override built-ins.
  */
-function loadConfig(cwd: string): { config: Config; scope: Scope } {
-  const projectCfg = tryReadJson(projectConfigPath(cwd));
-  const base = projectCfg
-    ? { config: projectCfg, scope: "project" as Scope }
-    : tryReadJson(globalConfigPath())
-      ? { config: tryReadJson(globalConfigPath())!, scope: "global" as Scope }
-      : {
-          config: { enabled: false, active: "default", guidelines: {} },
-          scope: "project" as Scope,
-        };
-
-  // Merge built-in guides underneath user guides (user overrides built-in)
-  base.config.guidelines = { ...BUILTIN_GUIDES, ...base.config.guidelines };
-
-  return base;
+function buildGlobalConfig(raw: Config | undefined): Config {
+  const guidelines = { ...BUILTIN_GUIDES, ...(raw?.guidelines ?? {}) };
+  const active =
+    raw?.active && guidelines[raw.active]
+      ? raw.active
+      : Object.keys(guidelines)[0] ?? "default";
+  return {
+    enabled: raw?.enabled ?? false,
+    active,
+    guidelines,
+  };
 }
 
-/** Write config to the given scope, creating parent directories as needed. */
+/**
+ * Build the project config (no built-ins merged — project scope is pure user guidelines).
+ */
+function buildProjectConfig(raw: Config | undefined): Config | undefined {
+  if (!raw) return undefined;
+  const active =
+    raw.active && raw.guidelines[raw.active]
+      ? raw.active
+      : Object.keys(raw.guidelines)[0] ?? "default";
+  return {
+    enabled: raw.enabled,
+    active,
+    guidelines: raw.guidelines,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Runtime State
+// ---------------------------------------------------------------------------
+
+/** Project-scope config (user guidelines only, no built-ins). Undefined if file doesn't exist. */
+let projectConfig: Config | undefined;
+/** Global-scope config (built-ins + user guidelines). Always defined. */
+let globalConfig: Config;
+/** Which scope is currently active for injection. */
+let activeScope: Scope;
+/** Track per-scope save requirement. */
+let dirtyProject = false;
+let dirtyGlobal = false;
+
+/**
+ * Load both scopes from disk and determine which is active.
+ *
+ * Priority:
+ *   1. Project config exists AND enabled with valid active → project scope
+ *   2. Global config enabled with valid active → global scope
+ *   3. Neither → both disabled, activeScope defaults to project (harmless default)
+ */
+function loadConfigs(cwd: string): void {
+  const projectRaw = tryReadJson(projectConfigPath(cwd));
+  const globalRaw = tryReadJson(globalConfigPath());
+
+  globalConfig = buildGlobalConfig(globalRaw);
+  projectConfig = buildProjectConfig(projectRaw);
+
+  if (projectConfig && projectConfig.enabled && projectConfig.guidelines[projectConfig.active]) {
+    activeScope = "project";
+  } else if (globalConfig.enabled && globalConfig.guidelines[globalConfig.active]) {
+    activeScope = "global";
+  } else {
+    activeScope = "project"; // ponytail: default, both disabled
+  }
+
+  dirtyProject = false;
+  dirtyGlobal = false;
+}
+
+/** Return the currently active effective config, or undefined if injection is off. */
+function activeConfig(): Config | undefined {
+  if (activeScope === "project" && projectConfig && projectConfig.enabled) {
+    return projectConfig;
+  }
+  if (globalConfig.enabled) {
+    return globalConfig;
+  }
+  return undefined;
+}
+
+/** Mark the active scope dirty and persist. */
+function markDirty(): void {
+  if (activeScope === "project") dirtyProject = true;
+  else dirtyGlobal = true;
+}
+
+/** Persist a scope's config to disk, stripping built-in names from global saves. */
 function saveConfig(scope: Scope, cwd: string, config: Config): void {
   const path = configPathFor(scope, cwd);
   const dir = dirname(path);
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
   }
-  writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
+  // When saving global, strip built-ins so they aren't persisted as user data
+  const toSave =
+    scope === "global"
+      ? {
+          ...config,
+          guidelines: Object.fromEntries(
+            Object.entries(config.guidelines).filter(([name]) => !isBuiltin(name)),
+          ),
+        }
+      : config;
+  writeFileSync(path, JSON.stringify(toSave, null, 2) + "\n");
+}
+
+/** Persist dirty scopes. */
+function flushDirty(cwd: string): void {
+  if (dirtyProject && projectConfig) saveConfig("project", cwd, projectConfig);
+  if (dirtyGlobal) saveConfig("global", cwd, globalConfig);
+  dirtyProject = false;
+  dirtyGlobal = false;
 }
 
 // ---------------------------------------------------------------------------
@@ -182,8 +268,8 @@ function isBuiltin(name: string): boolean {
   return name in BUILTIN_GUIDES;
 }
 
-function guideStatusText(theme: any, scope: Scope, config: Config): string {
-  if (!config.enabled || !config.guidelines[config.active]) {
+function guideStatusText(theme: any, scope: Scope, config: Config | undefined): string {
+  if (!config || !config.enabled || !config.guidelines[config.active]) {
     return theme.fg("error", "●") + " Guide";
   }
   const scopeLabel = scope === "project" ? "local" : "global";
@@ -193,47 +279,51 @@ function guideStatusText(theme: any, scope: Scope, config: Config): string {
 }
 
 // ---------------------------------------------------------------------------
+// Scope helpers for commands
+// ---------------------------------------------------------------------------
+
+/** Get the config for a given scope. */
+function configFor(scope: Scope): Config | undefined {
+  return scope === "project" ? projectConfig : globalConfig;
+}
+
+/** Get guidelines for a scope, or empty map if scope unavailable. */
+function guidelinesFor(scope: Scope): Record<string, string> {
+  const cfg = configFor(scope);
+  return cfg?.guidelines ?? {};
+}
+
+// ---------------------------------------------------------------------------
 // Extension
 // ---------------------------------------------------------------------------
 
 export default function (pi: ExtensionAPI) {
-  let config: Config = {
-    enabled: false,
-    active: "default",
-    guidelines: {},
-  };
-  let activeScope: Scope = "project";
-  /** Only persist to disk when the user explicitly changes something. */
-  let dirty = false;
-
   // --- Restore config on session start ---
   pi.on("session_start", async (_event, ctx) => {
-    const loaded = loadConfig(ctx.cwd);
-    config = loaded.config;
-    activeScope = loaded.scope;
-    dirty = false;
+    loadConfigs(ctx.cwd);
 
     ctx.ui.setStatus(
       "pi-guide",
-      guideStatusText(ctx.ui.theme, activeScope, config),
+      guideStatusText(ctx.ui.theme, activeScope, activeConfig()),
     );
   });
 
-  // --- Persist config on shutdown only if the user changed it ---
+  // --- Persist on shutdown ---
   pi.on("session_shutdown", async (_event, ctx) => {
-    if (!dirty) return;
-    saveConfig(activeScope, ctx.cwd, config);
+    flushDirty(ctx.cwd);
   });
 
   // --- Inject guideline into system prompt ---
   pi.on("before_agent_start", async (event, ctx) => {
-    const text = config.guidelines[config.active];
-    if (!config.enabled || !text) return;
+    const cfg = activeConfig();
+    if (!cfg) return;
 
-    // Ensure status indicator is visible (in case it was cleared externally)
+    const text = cfg.guidelines[cfg.active];
+    if (!text) return;
+
     ctx.ui.setStatus(
       "pi-guide",
-      guideStatusText(ctx.ui.theme, activeScope, config),
+      guideStatusText(ctx.ui.theme, activeScope, cfg),
     );
 
     return {
@@ -242,14 +332,14 @@ export default function (pi: ExtensionAPI) {
   });
 
   // -----------------------------------------------------------------------
-  // /guide:on  —  interactive: choose/create/edit a guideline
+  // /guide:create  —  interactive: choose scope, create or edit a guideline
   // -----------------------------------------------------------------------
-  pi.registerCommand("guide:on", {
+  pi.registerCommand("guide:create", {
     description:
       "Interactive: choose scope, then create or edit a guideline",
     handler: async (_args, ctx) => {
       if (!ctx.hasUI) {
-        ctx.ui.notify("/guide:on requires an interactive terminal.", "error");
+        ctx.ui.notify("/guide:create requires an interactive terminal.", "error");
         return;
       }
 
@@ -268,17 +358,19 @@ export default function (pi: ExtensionAPI) {
         "Where should the guideline be saved?",
         scopeLabels.map((s) => s.label),
       );
-      if (!chosenScope) return; // user cancelled
+      if (!chosenScope) return;
 
       const scope = scopeLabels.find((s) => s.label === chosenScope)!.value;
+      const scopeGuidelines = guidelinesFor(scope);
 
-      // 2. Pick existing guideline or create new
-      const names = Object.keys(config.guidelines);
+      // 2. Pick existing guideline to edit, or create new
+      // Only show user-created guidelines (built-ins are never editable)
+      const userNames = Object.keys(scopeGuidelines).filter((n) => !isBuiltin(n));
 
       let pickedName: string;
 
-      if (names.length === 0) {
-        // No guidelines yet — go straight to creation
+      if (userNames.length === 0) {
+        // No user guidelines in this scope — go straight to creation
         const name = await ctx.ui.input(
           "Name for the new guideline:",
           "default",
@@ -286,10 +378,8 @@ export default function (pi: ExtensionAPI) {
         if (!name) return;
         pickedName = name;
       } else {
-        //Show only user-created guidelines for editing (built-ins aren't editable)
-        const userNames = names.filter((n) => !isBuiltin(n));
         const options = userNames.map((n) =>
-          guidelineLabel(n, config.guidelines[n], n === config.active, false),
+          guidelineLabel(n, scopeGuidelines[n], false, false),
         );
         options.push("+ Create new guideline");
 
@@ -297,7 +387,7 @@ export default function (pi: ExtensionAPI) {
           "Choose a guideline to edit, or create new:",
           options,
         );
-        if (!chosen) return; // user cancelled
+        if (!chosen) return;
 
         const idx = options.indexOf(chosen);
         if (idx === userNames.length) {
@@ -311,24 +401,38 @@ export default function (pi: ExtensionAPI) {
       }
 
       // 3. Enter guideline text
-      const existingText = config.guidelines[pickedName] ?? "";
+      const existingText = scopeGuidelines[pickedName] ?? "";
       const text = await ctx.ui.editor(
         `Guideline text for "${pickedName}":`,
         existingText,
       );
-      if (!text) return; // user cancelled
+      if (!text) return;
 
-      // 4. Save and enable
-      config.guidelines[pickedName] = text;
-      config.active = pickedName;
-      config.enabled = true;
+      // 4. Save and enable for the chosen scope
+      if (scope === "project") {
+        if (!projectConfig) {
+          projectConfig = { enabled: true, active: pickedName, guidelines: {} };
+        }
+        projectConfig.guidelines[pickedName] = text;
+        projectConfig.active = pickedName;
+        projectConfig.enabled = true;
+        dirtyProject = true;
+      } else {
+        globalConfig.guidelines[pickedName] = text;
+        globalConfig.active = pickedName;
+        globalConfig.enabled = true;
+        dirtyGlobal = true;
+      }
+
       activeScope = scope;
-      dirty = true;
-      saveConfig(scope, ctx.cwd, config);
+      // Persist immediately (not waiting for shutdown)
+      saveConfig(scope, ctx.cwd, configFor(scope)!);
+      if (scope === "project") dirtyProject = false;
+      else dirtyGlobal = false;
 
       ctx.ui.setStatus(
         "pi-guide",
-        guideStatusText(ctx.ui.theme, scope, config),
+        guideStatusText(ctx.ui.theme, scope, configFor(scope)),
       );
 
       ctx.ui.notify(
@@ -339,180 +443,312 @@ export default function (pi: ExtensionAPI) {
   });
 
   // -----------------------------------------------------------------------
-  // /guide:use  —  switch active guideline (with preview selector)
+  // /guide:use  —  switch active guideline & scope
   // -----------------------------------------------------------------------
   pi.registerCommand("guide:use", {
     description:
-      "Switch active guideline. Shows a selector with previews if no name given.",
+      "Switch active guideline and scope. Shows selectors if no name given.",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) {
         ctx.ui.notify("/guide:use requires an interactive terminal.", "error");
         return;
       }
 
-      const names = Object.keys(config.guidelines);
+      const argName = args.trim();
+
+      // --- Direct name lookup ---
+      if (argName) {
+        // Search current scope first, then other scope
+        const currentCfg = configFor(activeScope);
+        const otherScope: Scope = activeScope === "project" ? "global" : "project";
+        const otherCfg = configFor(otherScope);
+
+        const inCurrent = currentCfg && currentCfg.guidelines[argName];
+        const inOther = otherCfg && otherCfg.guidelines[argName];
+
+        if (inCurrent) {
+          if (argName === currentCfg!.active) {
+            ctx.ui.notify(
+              `✓ Guideline "${argName}" is already active (${activeScope} scope).`,
+              "info",
+            );
+            return;
+          }
+          currentCfg!.active = argName;
+          currentCfg!.enabled = true;
+          markDirty();
+          flushDirty(ctx.cwd);
+          ctx.ui.notify(
+            `✓ Switched to guideline "${argName}" (${activeScope} scope)`,
+            "info",
+          );
+        } else if (inOther) {
+          const oldScope = activeScope;
+          activeScope = otherScope;
+          otherCfg!.active = argName;
+          otherCfg!.enabled = true;
+          markDirty();
+          flushDirty(ctx.cwd);
+          ctx.ui.notify(
+            `✓ Using "${argName}" from ${otherScope} scope (switched from ${oldScope})`,
+            "info",
+          );
+        } else {
+          ctx.ui.notify(
+            `Guideline "${argName}" not found in any scope.`,
+            "warning",
+          );
+          return;
+        }
+
+        ctx.ui.setStatus(
+          "pi-guide",
+          guideStatusText(ctx.ui.theme, activeScope, activeConfig()),
+        );
+        return;
+      }
+
+      // --- Interactive: scope selector → guideline selector ---
+
+      // 1. Choose scope (only show project if it exists)
+      const scopeOptions: { value: Scope; label: string }[] = [];
+      if (projectConfig) {
+        scopeOptions.push({
+          value: "project",
+          label: `Project scope  (.pi/guide.json)${activeScope === "project" ? "  ← current" : ""}`,
+        });
+      }
+      scopeOptions.push({
+        value: "global",
+        label: `Global scope   (~/.pi/agent/guide.json)${activeScope === "global" ? "  ← current" : ""}`,
+      });
+
+      const chosenScopeLabel = await ctx.ui.select(
+        "Which scope should the guideline apply to?",
+        scopeOptions.map((s) => s.label),
+      );
+      if (!chosenScopeLabel) return;
+
+      const scope = scopeOptions.find((s) => s.label === chosenScopeLabel)!.value;
+      const scopeCfg = configFor(scope)!;
+      const names = Object.keys(scopeCfg.guidelines);
 
       if (names.length === 0) {
+        const scopeLabel = scope === "project" ? "project" : "global";
         ctx.ui.notify(
-          "No guidelines saved. Use /guide:on to create one.",
+          `No guidelines in ${scopeLabel} scope. Use /guide:create to add one.`,
           "warning",
         );
         return;
       }
 
-      let pickedName: string;
-
-      // If a name was provided and it exists, use it directly
-      const argName = args.trim();
-      if (argName && config.guidelines[argName]) {
-        pickedName = argName;
-      } else {
-        // Show selector with previews
-        if (argName) {
+      // 2. Choose guideline from that scope
+      if (names.length === 1) {
+        // Only one — use it directly
+        const name = names[0];
+        if (scope === activeScope && name === scopeCfg.active) {
           ctx.ui.notify(
-            `Guideline "${argName}" not found. Showing available guidelines.`,
-            "warning",
+            `✓ Guideline "${name}" is already active (${scope} scope).`,
+            "info",
           );
+          return;
         }
 
-        const options = names.map((n) =>
-          guidelineLabel(n, config.guidelines[n], n === config.active, isBuiltin(n)),
+        activeScope = scope;
+        scopeCfg.active = name;
+        scopeCfg.enabled = true;
+        markDirty();
+        flushDirty(ctx.cwd);
+        ctx.ui.notify(
+          `✓ Using "${name}" (${scope} scope — only guideline available)`,
+          "info",
         );
-        const chosen = await ctx.ui.select(
-          "Choose active guideline:",
-          options,
+        ctx.ui.setStatus(
+          "pi-guide",
+          guideStatusText(ctx.ui.theme, activeScope, scopeCfg),
         );
-        if (!chosen) return; // user cancelled
-
-        pickedName = names[options.indexOf(chosen)];
+        return;
       }
 
-      if (pickedName === config.active) {
+      const options = names.map((n) =>
+        guidelineLabel(
+          n,
+          scopeCfg.guidelines[n],
+          scope === activeScope && n === scopeCfg.active,
+          isBuiltin(n),
+        ),
+      );
+
+      const chosen = await ctx.ui.select("Choose active guideline:", options);
+      if (!chosen) return;
+
+      const pickedName = names[options.indexOf(chosen)];
+
+      if (scope === activeScope && pickedName === scopeCfg.active) {
         ctx.ui.notify(
-          `Guideline "${pickedName}" is already active.`,
+          `✓ Guideline "${pickedName}" is already active.`,
           "info",
         );
         return;
       }
 
-      config.active = pickedName;
-      config.enabled = true;
-      dirty = true;
-      saveConfig(activeScope, ctx.cwd, config);
+      activeScope = scope;
+      scopeCfg.active = pickedName;
+      scopeCfg.enabled = true;
+      markDirty();
+      flushDirty(ctx.cwd);
 
       ctx.ui.setStatus(
         "pi-guide",
-        guideStatusText(ctx.ui.theme, activeScope, config),
+        guideStatusText(ctx.ui.theme, activeScope, scopeCfg),
       );
 
       ctx.ui.notify(
-        `✓ Switched to guideline "${pickedName}" (${activeScope} scope)`,
+        `✓ Switched to guideline "${pickedName}" (${scope} scope)`,
         "info",
       );
     },
   });
 
   // -----------------------------------------------------------------------
-  // /guide:delete  —  delete a user-created guideline
+  // /guide:delete  —  delete a user-created guideline from the active scope
   // -----------------------------------------------------------------------
   pi.registerCommand("guide:delete", {
     description:
-      "Delete a user-created guideline. Shows a selector if no name given.",
+      "Delete a user-created guideline from the active scope. Built-ins cannot be deleted.",
     handler: async (args, ctx) => {
       if (!ctx.hasUI) {
         ctx.ui.notify("/guide:delete requires an interactive terminal.", "error");
         return;
       }
 
-      // Only user-created guidelines are deletable (not built-ins)
-      const userNames = Object.keys(config.guidelines).filter(
-        (n) => !isBuiltin(n),
-      );
+      const argName = args.trim();
 
-      if (userNames.length === 0) {
+      // Guard: built-ins are never deletable
+      if (argName && isBuiltin(argName)) {
         ctx.ui.notify(
-          "No user-created guidelines to delete. Built-in guidelines cannot be removed.",
+          `Cannot delete built-in guideline "${argName}". Built-in guidelines are read-only.`,
           "warning",
         );
         return;
       }
 
-      let pickedName: string;
+      const scopeCfg = configFor(activeScope);
+      if (!scopeCfg) {
+        ctx.ui.notify(
+          `No config loaded for ${activeScope} scope.`,
+          "error",
+        );
+        return;
+      }
 
-      // If a name was provided and it's deletable, use it directly
-      const argName = args.trim();
-      if (argName && userNames.includes(argName)) {
-        pickedName = argName;
-      } else {
-        if (argName) {
+      const userNames = Object.keys(scopeCfg.guidelines).filter(
+        (n) => !isBuiltin(n),
+      );
+
+      if (userNames.length === 0) {
+        if (activeScope === "global") {
           ctx.ui.notify(
-            `Guideline "${argName}" not found or is built-in. Showing deletable guidelines.`,
+            "No user-created guidelines in global scope. Built-in guidelines cannot be deleted.",
+            "warning",
+          );
+        } else {
+          ctx.ui.notify(
+            "No user-created guidelines in project scope. Use /guide:create to add one first.",
             "warning",
           );
         }
+        return;
+      }
 
+      let pickedName: string;
+
+      if (argName && userNames.includes(argName)) {
+        // Direct name lookup — found in current scope
+        pickedName = argName;
+      } else {
+        // No name, or name not found — show selector
+        if (argName) {
+          ctx.ui.notify(
+            `Guideline "${argName}" not found in ${activeScope} scope. Showing deletable guidelines.`,
+            "warning",
+          );
+        }
         const options = userNames.map((n) =>
-          guidelineLabel(n, config.guidelines[n], n === config.active, false),
+          guidelineLabel(
+            n,
+            scopeCfg.guidelines[n],
+            n === scopeCfg.active,
+            false,
+          ),
         );
         const chosen = await ctx.ui.select(
-          "Choose guideline to delete:",
+          `Choose guideline to delete from ${activeScope} scope:`,
           options,
         );
-        if (!chosen) return; // user cancelled
+        if (!chosen) return;
 
         pickedName = userNames[options.indexOf(chosen)];
       }
 
-      const wasActive = pickedName === config.active;
-      delete config.guidelines[pickedName];
+      const wasActive = pickedName === scopeCfg.active;
+      delete scopeCfg.guidelines[pickedName];
 
-      // If we deleted the active guideline, pick the first remaining
+      // If we deleted the active guideline, pick the first remaining or disable
       if (wasActive) {
-        const remaining = Object.keys(config.guidelines);
+        const remaining = Object.keys(scopeCfg.guidelines);
         if (remaining.length > 0) {
-          config.active = remaining[0];
+          scopeCfg.active = remaining[0];
         } else {
-          config.enabled = false;
+          scopeCfg.enabled = false;
         }
       }
 
-      dirty = true;
-      saveConfig(activeScope, ctx.cwd, config);
+      markDirty();
+      flushDirty(ctx.cwd);
 
       ctx.ui.setStatus(
         "pi-guide",
-        guideStatusText(ctx.ui.theme, activeScope, config),
+        guideStatusText(ctx.ui.theme, activeScope, activeConfig()),
       );
 
-      if (wasActive && !config.enabled) {
+      if (wasActive && !scopeCfg.enabled) {
         ctx.ui.notify(
-          `✓ Deleted "${pickedName}" (was active — injection disabled)`,
+          `✓ Deleted "${pickedName}" (was active — injection disabled for ${activeScope} scope)`,
           "info",
         );
       } else if (wasActive) {
         ctx.ui.notify(
-          `✓ Deleted "${pickedName}". Switched to "${config.active}".`,
+          `✓ Deleted "${pickedName}". Switched to "${scopeCfg.active}".`,
           "info",
         );
       } else {
-        ctx.ui.notify(`✓ Deleted "${pickedName}".`, "info");
+        ctx.ui.notify(
+          `✓ Deleted "${pickedName}" from ${activeScope} scope.`,
+          "info",
+        );
       }
     },
   });
 
   // -----------------------------------------------------------------------
-  // /guide:off  —  disable injection
+  // /guide:off  —  disable injection (current scope)
   // -----------------------------------------------------------------------
   pi.registerCommand("guide:off", {
-    description: "Disable custom guideline injection",
+    description: "Disable custom guideline injection for the active scope",
     handler: async (_args, ctx) => {
-      config.enabled = false;
-      dirty = true;
-      saveConfig(activeScope, ctx.cwd, config);
+      const scopeCfg = configFor(activeScope);
+      if (!scopeCfg) {
+        ctx.ui.notify("No active config to disable.", "warning");
+        return;
+      }
+      scopeCfg.enabled = false;
+      markDirty();
+      flushDirty(ctx.cwd);
 
       ctx.ui.setStatus(
         "pi-guide",
-        guideStatusText(ctx.ui.theme, activeScope, config),
+        guideStatusText(ctx.ui.theme, activeScope, activeConfig()),
       );
 
       const label = activeScope === "project" ? "project" : "global";

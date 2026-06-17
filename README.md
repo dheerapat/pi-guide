@@ -19,16 +19,16 @@ pi install /path/to/pi-guide
 ## Usage
 
 ```
-/guide:on     — Interactive: choose scope, then create or edit a guideline
-/guide:use    — Switch active guideline (selector with text previews)
-/guide:delete — Delete a user-created guideline
-/guide:off    — Disable injection
+/guide:create — Interactive: choose scope, then create or edit a guideline
+/guide:use    — Switch active guideline & scope (selector with previews)
+/guide:delete — Delete a user-created guideline from the active scope
+/guide:off    — Disable injection (active scope)
 ```
 
 ### Example session
 
 ```
-You:  /guide:on
+You:  /guide:create
   ┌─ Where should the guideline be saved? ──────────────────────┐
   │  ○ Project scope  (.pi/guide.json)                          │
   │  ● Global scope   (~/.pi/agent/guide.json)                  │
@@ -45,7 +45,7 @@ You:  /guide:on
 
  pi:  ✓ Guideline "default" saved to global scope and enabled
 
-You:  /guide:on                   (create a second guideline)
+You:  /guide:create               (create a second guideline)
   … [pick "Create new guideline"]
   ┌─ Name for the new guideline: ───────────────────────────────┐
   │  frontend                                                    │
@@ -58,9 +58,14 @@ You:  /guide:on                   (create a second guideline)
  pi:  ✓ Guideline "frontend" saved to global scope and enabled
 
 You:  /guide:use
+  ┌─ Which scope should the guideline apply to? ───────────────┐
+  │    Global scope   (~/.pi/agent/guide.json)  ← current      │
+  └────────────────────────────────────────────────────────────┘
+
   ┌─ Choose active guideline: ──────────────────────────────────┐
   │  ✓ frontend — Use React Server Components. Prefer CSS mo…  │
   │    default  — Always write pure functions with explicit e…  │
+  │    ponytail — You are a lazy senior developer… (built-in)   │
   └─────────────────────────────────────────────────────────────┘
 
  pi:  ✓ Switched to guideline "default" (global scope)
@@ -93,27 +98,37 @@ Each scope stores a JSON file with named guidelines and an active key:
 }
 ```
 
+**Built-in guidelines** are shipped as `.md` files in the extension and are always
+available under **global scope only**. They appear with a `(built-in)` suffix and
+cannot be edited or deleted. User-created guidelines with the same name override
+built-ins.
+
 **Backward compatibility:** old single-guideline configs are auto-migrated on load.
 Your existing `{ "enabled": true, "text": "..." }` becomes a guideline named `"default"`.
 
-## Config scoping
+## Scoping
 
-Config supports two levels with fallback:
+Each scope stores its own config independently. Built-ins only exist in global scope.
 
-| Scope | Path | Behavior |
+| Scope | Path | Guidelines |
 |---|---|---|
-| **Global** | `~/.pi/agent/guide.json` | Fallback base — applies to all projects |
-| **Project** | `<project>/.pi/guide.json` | Overrides global — always wins if present |
+| **Global** | `~/.pi/agent/guide.json` | Built-ins + user-created |
+| **Project** | `<project>/.pi/guide.json` | User-created only (no built-ins) |
 
-**Load order:** project → global → defaults.
-**Save:** `/guide:on` saves to the scope you choose. `/guide:use` and `/guide:off`
-save to the scope that was active at load time.
+**Active scope** is determined at session start:
+1. Project config exists AND enabled → project scope active
+2. Else global config enabled → global scope active
+3. Else → injection off
+
+`/guide:use` lets you switch between scopes at any time. `create`, `delete`, and
+`off` operate on whichever scope you pick (or the active scope).
 
 ### Use cases
 
 - Set a universal guideline in `~/.pi/agent/guide.json` for all projects.
-- Override it per project by running `/guide:on` and picking project scope.
-- Delete the project `.pi/guide.json` to fall back to the global one.
+- Override it per project by running `/guide:create` and picking project scope.
+- Use built-in guidelines like `ponytail` or `andrej` via `/guide:use` (global scope).
+- Switch between project and global scope anytime with `/guide:use`.
 - Create named guidelines for different contexts (`backend`, `frontend`, `review`)
   and switch between them with `/guide:use`.
 
