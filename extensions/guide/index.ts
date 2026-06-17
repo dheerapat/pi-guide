@@ -94,13 +94,17 @@ function configPathFor(scope: Scope, cwd: string): string {
  * global scope may have active pointing to a built-in that isn't in the
  * persisted guidelines map.
  */
-function normalizeConfig(raw: Record<string, unknown>): Config {
+export function normalizeConfig(raw: Record<string, unknown>): Config {
   // Already in new format
   if (raw.guidelines && typeof raw.guidelines === "object") {
     return {
       enabled: Boolean(raw.enabled),
       active: typeof raw.active === "string" ? raw.active : "default",
-      guidelines: raw.guidelines as Record<string, string>,
+      guidelines: Object.fromEntries(
+        Object.entries(raw.guidelines as Record<string, unknown>).filter(
+          ([, v]) => typeof v === "string",
+        ),
+      ) as Record<string, string>,
     };
   }
 
@@ -127,7 +131,7 @@ function tryReadJson(path: string): Config | undefined {
  * Built-ins provide the foundation; user-created guidelines with the same name
  * override built-ins.
  */
-function buildGlobalConfig(raw: Config | undefined): Config {
+export function buildGlobalConfig(raw: Config | undefined): Config {
   const guidelines = { ...BUILTIN_GUIDES, ...(raw?.guidelines ?? {}) };
   const active =
     raw?.active && guidelines[raw.active]
@@ -143,7 +147,7 @@ function buildGlobalConfig(raw: Config | undefined): Config {
 /**
  * Build the project config (no built-ins merged — project scope is pure user guidelines).
  */
-function buildProjectConfig(raw: Config | undefined): Config | undefined {
+export function buildProjectConfig(raw: Config | undefined): Config | undefined {
   if (!raw) return undefined;
   const active =
     raw.active && raw.guidelines[raw.active]
@@ -287,8 +291,13 @@ function guidelineLabel(
 }
 
 /** Check whether a guideline name belongs to the built-in set. */
-function isBuiltin(name: string): boolean {
+export function isBuiltin(name: string): boolean {
   return name in BUILTIN_GUIDES;
+}
+
+/** Validate a guideline name: non-empty, no path separators. */
+function isValidGuidelineName(name: string): boolean {
+  return name.length > 0 && !name.includes("/") && !name.includes("\\");
 }
 
 function guideStatusText(theme: any, scope: Scope, config: Config | undefined): string {
@@ -323,6 +332,26 @@ function guidelinesFor(scope: Scope): Record<string, string> {
 export default function (pi: ExtensionAPI) {
   // --- Restore config on session start ---
   pi.on("session_start", async (_event, ctx) => {
+    // Warn if config files exist but contain invalid JSON
+    const projectPath = projectConfigPath(ctx.cwd);
+    if (existsSync(projectPath)) {
+      try { JSON.parse(readFileSync(projectPath, "utf-8")); } catch {
+        ctx.ui.notify(
+          `Project config .pi/guide.json is corrupt — using defaults.`,
+          "warning",
+        );
+      }
+    }
+    const globalPath = globalConfigPath();
+    if (existsSync(globalPath)) {
+      try { JSON.parse(readFileSync(globalPath, "utf-8")); } catch {
+        ctx.ui.notify(
+          `Global config ~/.pi/agent/guide.json is corrupt — using defaults.`,
+          "warning",
+        );
+      }
+    }
+
     loadConfigs(ctx.cwd);
 
     ctx.ui.setStatus(
@@ -399,6 +428,13 @@ export default function (pi: ExtensionAPI) {
           "default",
         );
         if (!name) return;
+        if (!isValidGuidelineName(name)) {
+          ctx.ui.notify(
+            "Guideline name must not be empty or contain path separators (/ \\).",
+            "warning",
+          );
+          return;
+        }
         pickedName = name;
       } else {
         const options = userNames.map((n) =>
@@ -417,6 +453,13 @@ export default function (pi: ExtensionAPI) {
           // "Create new" was chosen
           const name = await ctx.ui.input("Name for the new guideline:");
           if (!name) return;
+          if (!isValidGuidelineName(name)) {
+            ctx.ui.notify(
+              "Guideline name must not be empty or contain path separators (/ \\).",
+              "warning",
+            );
+            return;
+          }
           pickedName = name;
         } else {
           pickedName = userNames[idx];

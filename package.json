@@ -6,10 +6,12 @@
     "pi-package"
   ],
   "devDependencies": {
-    "typescript": "^5.7"
+    "tsx": "^4.22.4",
+    "typescript": "^6.0.3"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
