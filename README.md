@@ -19,9 +19,10 @@ pi install /path/to/pi-guide
 ## Usage
 
 ```
-/guide:on   — Interactive: choose scope, then create or edit a guideline
-/guide:use  — Switch active guideline (selector with text previews)
-/guide:off  — Disable injection
+/guide:on     — Interactive: choose scope, then create or edit a guideline
+/guide:use    — Switch active guideline (selector with text previews)
+/guide:delete — Delete a user-created guideline
+/guide:off    — Disable injection
 ```
 
 ### Example session
@@ -69,6 +70,9 @@ You:  /guide:use frontend         (direct switch by name)
 
 You:  Write a React component to display a user profile.
  pi:  [responds while following your frontend guideline]
+
+You:  /guide:delete frontend
+ pi:  ✓ Deleted "frontend".
 
 You:  /guide:off
  pi:  ✕ Guideline injection disabled (global scope)

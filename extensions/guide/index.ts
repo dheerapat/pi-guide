@@ -12,6 +12,7 @@
  *   /guide:on   — Interactive: choose/create/edit a guideline
  *   /guide:off  — Disable injection
  *   /guide:use  — Switch active guideline (selector with previews)
+ *   /guide:delete — Delete a user-created guideline
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -408,6 +409,94 @@ export default function (pi: ExtensionAPI) {
         `✓ Switched to guideline "${pickedName}" (${activeScope} scope)`,
         "info",
       );
+    },
+  });
+
+  // -----------------------------------------------------------------------
+  // /guide:delete  —  delete a user-created guideline
+  // -----------------------------------------------------------------------
+  pi.registerCommand("guide:delete", {
+    description:
+      "Delete a user-created guideline. Shows a selector if no name given.",
+    handler: async (args, ctx) => {
+      if (!ctx.hasUI) {
+        ctx.ui.notify("/guide:delete requires an interactive terminal.", "error");
+        return;
+      }
+
+      // Only user-created guidelines are deletable (not built-ins)
+      const userNames = Object.keys(config.guidelines).filter(
+        (n) => !isBuiltin(n),
+      );
+
+      if (userNames.length === 0) {
+        ctx.ui.notify(
+          "No user-created guidelines to delete. Built-in guidelines cannot be removed.",
+          "warning",
+        );
+        return;
+      }
+
+      let pickedName: string;
+
+      // If a name was provided and it's deletable, use it directly
+      const argName = args.trim();
+      if (argName && userNames.includes(argName)) {
+        pickedName = argName;
+      } else {
+        if (argName) {
+          ctx.ui.notify(
+            `Guideline "${argName}" not found or is built-in. Showing deletable guidelines.`,
+            "warning",
+          );
+        }
+
+        const options = userNames.map((n) =>
+          guidelineLabel(n, config.guidelines[n], n === config.active, false),
+        );
+        const chosen = await ctx.ui.select(
+          "Choose guideline to delete:",
+          options,
+        );
+        if (!chosen) return; // user cancelled
+
+        pickedName = userNames[options.indexOf(chosen)];
+      }
+
+      const wasActive = pickedName === config.active;
+      delete config.guidelines[pickedName];
+
+      // If we deleted the active guideline, pick the first remaining
+      if (wasActive) {
+        const remaining = Object.keys(config.guidelines);
+        if (remaining.length > 0) {
+          config.active = remaining[0];
+        } else {
+          config.enabled = false;
+        }
+      }
+
+      dirty = true;
+      saveConfig(activeScope, ctx.cwd, config);
+
+      ctx.ui.setStatus(
+        "pi-guide",
+        guideStatusText(ctx.ui.theme, activeScope, config),
+      );
+
+      if (wasActive && !config.enabled) {
+        ctx.ui.notify(
+          `✓ Deleted "${pickedName}" (was active — injection disabled)`,
+          "info",
+        );
+      } else if (wasActive) {
+        ctx.ui.notify(
+          `✓ Deleted "${pickedName}". Switched to "${config.active}".`,
+          "info",
+        );
+      } else {
+        ctx.ui.notify(`✓ Deleted "${pickedName}".`, "info");
+      }
     },
   });
 
