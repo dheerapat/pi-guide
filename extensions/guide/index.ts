@@ -15,9 +15,41 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
-import { resolve, dirname, join } from "node:path";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { resolve, dirname, join, extname } from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
+
+// ---------------------------------------------------------------------------
+// Built-in Guides
+// ---------------------------------------------------------------------------
+
+/** Resolve the builtins directory relative to this extension file. */
+const __filename = fileURLToPath(import.meta.url);
+const BUILTINS_DIR = join(dirname(__filename), "builtins");
+
+/**
+ * Load all built-in guidelines from .md files in the builtins/ directory.
+ * Each file name (minus .md) becomes the guideline name.
+ * Returns an empty map if the directory doesn't exist or can't be read.
+ */
+function loadBuiltinGuides(): Record<string, string> {
+  const map: Record<string, string> = {};
+  try {
+    if (!existsSync(BUILTINS_DIR)) return map;
+    for (const entry of readdirSync(BUILTINS_DIR)) {
+      if (extname(entry) !== ".md") continue;
+      const name = entry.slice(0, -3); // strip .md
+      map[name] = readFileSync(join(BUILTINS_DIR, entry), "utf-8");
+    }
+  } catch {
+    // Silently return empty — built-ins are a bonus, not a requirement
+  }
+  return map;
+}
+
+/** Built-in guidelines loaded from disk at module init. */
+const BUILTIN_GUIDES: Record<string, string> = loadBuiltinGuides();
 
 // ---------------------------------------------------------------------------
 // Config
@@ -91,18 +123,24 @@ function tryReadJson(path: string): Config | undefined {
  * Project scope always wins if the file exists, regardless of its
  * enabled/text values. This lets you explicitly disable injection
  * for a project even when a global guideline is set.
+ *
+ * Built-in guides are always merged in (user-created ones override).
  */
 function loadConfig(cwd: string): { config: Config; scope: Scope } {
   const projectCfg = tryReadJson(projectConfigPath(cwd));
-  if (projectCfg) return { config: projectCfg, scope: "project" };
+  const base = projectCfg
+    ? { config: projectCfg, scope: "project" as Scope }
+    : tryReadJson(globalConfigPath())
+      ? { config: tryReadJson(globalConfigPath())!, scope: "global" as Scope }
+      : {
+          config: { enabled: false, active: "default", guidelines: {} },
+          scope: "project" as Scope,
+        };
 
-  const globalCfg = tryReadJson(globalConfigPath());
-  if (globalCfg) return { config: globalCfg, scope: "global" };
+  // Merge built-in guides underneath user guides (user overrides built-in)
+  base.config.guidelines = { ...BUILTIN_GUIDES, ...base.config.guidelines };
 
-  return {
-    config: { enabled: false, active: "default", guidelines: {} },
-    scope: "project",
-  };
+  return base;
 }
 
 /** Write config to the given scope, creating parent directories as needed. */
@@ -131,9 +169,16 @@ function guidelineLabel(
   name: string,
   text: string,
   isActive: boolean,
+  isBuiltin: boolean,
 ): string {
   const prefix = isActive ? "✓ " : "  ";
-  return `${prefix}${name} — ${previewText(text)}`;
+  const suffix = isBuiltin ? " (built-in)" : "";
+  return `${prefix}${name} — ${previewText(text)}${suffix}`;
+}
+
+/** Check whether a guideline name belongs to the built-in set. */
+function isBuiltin(name: string): boolean {
+  return name in BUILTIN_GUIDES;
 }
 
 function guideStatusText(theme: any, scope: Scope, config: Config): string {
@@ -240,8 +285,10 @@ export default function (pi: ExtensionAPI) {
         if (!name) return;
         pickedName = name;
       } else {
-        const options = names.map((n) =>
-          guidelineLabel(n, config.guidelines[n], n === config.active),
+        //Show only user-created guidelines for editing (built-ins aren't editable)
+        const userNames = names.filter((n) => !isBuiltin(n));
+        const options = userNames.map((n) =>
+          guidelineLabel(n, config.guidelines[n], n === config.active, false),
         );
         options.push("+ Create new guideline");
 
@@ -252,13 +299,13 @@ export default function (pi: ExtensionAPI) {
         if (!chosen) return; // user cancelled
 
         const idx = options.indexOf(chosen);
-        if (idx === names.length) {
+        if (idx === userNames.length) {
           // "Create new" was chosen
           const name = await ctx.ui.input("Name for the new guideline:");
           if (!name) return;
           pickedName = name;
         } else {
-          pickedName = names[idx];
+          pickedName = userNames[idx];
         }
       }
 
@@ -328,7 +375,7 @@ export default function (pi: ExtensionAPI) {
         }
 
         const options = names.map((n) =>
-          guidelineLabel(n, config.guidelines[n], n === config.active),
+          guidelineLabel(n, config.guidelines[n], n === config.active, isBuiltin(n)),
         );
         const chosen = await ctx.ui.select(
           "Choose active guideline:",
