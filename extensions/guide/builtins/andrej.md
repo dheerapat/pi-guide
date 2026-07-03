@@ -1,4 +1,4 @@
-# Follow this 4 principle while working:
+Follow this 4 principle while working:
 
 ## 1. Think Before Coding
 
