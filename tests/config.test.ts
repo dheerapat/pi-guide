@@ -24,7 +24,7 @@ describe("normalizeConfig", () => {
     });
     assert.deepStrictEqual(result, {
       enabled: true,
-      active: "default",
+      active: ["default"],
       guidelines: { default: "Always use strict mode" },
     });
   });
@@ -33,7 +33,7 @@ describe("normalizeConfig", () => {
     const result = normalizeConfig({ enabled: true, text: "" });
     assert.deepStrictEqual(result, {
       enabled: false,
-      active: "default",
+      active: [],
       guidelines: {},
     });
   });
@@ -42,12 +42,12 @@ describe("normalizeConfig", () => {
     const result = normalizeConfig({ enabled: true });
     assert.deepStrictEqual(result, {
       enabled: false,
-      active: "default",
+      active: [],
       guidelines: {},
     });
   });
 
-  it("reads new multi-guideline format", () => {
+  it("reads new multi-guideline format with string active", () => {
     const result = normalizeConfig({
       enabled: true,
       active: "frontend",
@@ -55,17 +55,30 @@ describe("normalizeConfig", () => {
     });
     assert.deepStrictEqual(result, {
       enabled: true,
-      active: "frontend",
+      active: ["frontend"],
       guidelines: { default: "a", frontend: "b" },
     });
   });
 
-  it("defaults active to 'default' when missing", () => {
+  it("reads array active format", () => {
+    const result = normalizeConfig({
+      enabled: true,
+      active: ["frontend", "default"],
+      guidelines: { default: "a", frontend: "b" },
+    });
+    assert.deepStrictEqual(result, {
+      enabled: true,
+      active: ["frontend", "default"],
+      guidelines: { default: "a", frontend: "b" },
+    });
+  });
+
+  it("defaults active to ['default'] when missing", () => {
     const result = normalizeConfig({
       enabled: true,
       guidelines: { foo: "bar" },
     });
-    assert.equal(result.active, "default");
+    assert.deepStrictEqual(result.active, ["default"]);
   });
 
   it("defaults enabled to false when missing", () => {
@@ -85,7 +98,7 @@ describe("normalizeConfig", () => {
     const result = normalizeConfig({});
     assert.deepStrictEqual(result, {
       enabled: false,
-      active: "default",
+      active: [],
       guidelines: {},
     });
   });
@@ -96,6 +109,15 @@ describe("normalizeConfig", () => {
       text: "something",
     });
     assert.equal(result.enabled, false);
+  });
+
+  it("filters non-string entries from array active", () => {
+    const result = normalizeConfig({
+      enabled: true,
+      active: ["good", 123, null, "also-good"],
+      guidelines: { good: "g", "also-good": "ag" },
+    });
+    assert.deepStrictEqual(result.active, ["good", "also-good"]);
   });
 });
 
@@ -111,13 +133,14 @@ describe("buildGlobalConfig", () => {
     assert.ok("andrej" in result.guidelines);
     assert.ok("pirate" in result.guidelines);
     // Active defaults to first built-in
-    assert.ok(result.active in result.guidelines);
+    assert.ok(result.active.length > 0);
+    assert.ok(result.active[0] in result.guidelines);
   });
 
   it("merges user guidelines over built-ins", () => {
     const raw = {
       enabled: true,
-      active: "ponytail",
+      active: ["ponytail"],
       guidelines: { custom: "my custom guideline" },
     };
     const result = buildGlobalConfig(raw);
@@ -130,7 +153,7 @@ describe("buildGlobalConfig", () => {
   it("user guideline overrides built-in with same name", () => {
     const raw = {
       enabled: true,
-      active: "ponytail",
+      active: ["ponytail"],
       guidelines: { ponytail: "overridden ponytail" },
     };
     const result = buildGlobalConfig(raw);
@@ -140,41 +163,51 @@ describe("buildGlobalConfig", () => {
   it("active resolves to user guideline when valid", () => {
     const raw = {
       enabled: true,
-      active: "custom",
+      active: ["custom"],
       guidelines: { custom: "hello" },
     };
     const result = buildGlobalConfig(raw);
-    assert.equal(result.active, "custom");
+    assert.deepStrictEqual(result.active, ["custom"]);
   });
 
-  it("active falls back to first merged guideline when invalid", () => {
+  it("filters out invalid names from active array", () => {
     const raw = {
       enabled: true,
-      active: "nonexistent",
+      active: ["ponytail", "nonexistent", "andrej"],
       guidelines: { foo: "bar" },
     };
     const result = buildGlobalConfig(raw);
-    // Built-ins are merged first, so the first key is a built-in (andrej),
-    // not the user guideline "foo"
-    assert.ok(result.active in result.guidelines);
-    assert.notEqual(result.active, "nonexistent");
+    // ponytail and andrej are built-ins, nonexistent is gone
+    assert.deepStrictEqual(result.active, ["ponytail", "andrej"]);
+  });
+
+  it("active falls back to first merged guideline when all invalid", () => {
+    const raw = {
+      enabled: true,
+      active: ["nonexistent"],
+      guidelines: { foo: "bar" },
+    };
+    const result = buildGlobalConfig(raw);
+    assert.ok(result.active.length > 0);
+    assert.ok(result.active[0] in result.guidelines);
+    assert.notDeepStrictEqual(result.active, ["nonexistent"]);
   });
 
   it("active falls back to first built-in when raw has no guidelines", () => {
     const raw = {
       enabled: true,
-      active: "ponytail",
+      active: ["ponytail"],
       guidelines: {},
     };
     const result = buildGlobalConfig(raw);
     // ponytail is a built-in, so it should still resolve
-    assert.equal(result.active, "ponytail");
+    assert.deepStrictEqual(result.active, ["ponytail"]);
   });
 
   it("preserves enabled=false from raw", () => {
     const raw = {
       enabled: false,
-      active: "ponytail",
+      active: ["ponytail"],
       guidelines: { custom: "text" },
     };
     const result = buildGlobalConfig(raw);
@@ -194,30 +227,40 @@ describe("buildProjectConfig", () => {
   it("returns normalized config", () => {
     const raw = {
       enabled: true,
-      active: "backend",
+      active: ["backend"],
       guidelines: { backend: "use strict types", frontend: "use React" },
     };
     const result = buildProjectConfig(raw);
     assert.notEqual(result, undefined);
     assert.equal(result!.enabled, true);
-    assert.equal(result!.active, "backend");
+    assert.deepStrictEqual(result!.active, ["backend"]);
     assert.deepStrictEqual(result!.guidelines, raw.guidelines);
   });
 
-  it("active falls back to first guideline when invalid", () => {
+  it("filters invalid names from active array", () => {
     const raw = {
       enabled: true,
-      active: "missing",
+      active: ["a", "missing", "b"],
       guidelines: { a: "1", b: "2" },
     };
     const result = buildProjectConfig(raw)!;
-    assert.equal(result.active, "a");
+    assert.deepStrictEqual(result.active, ["a", "b"]);
+  });
+
+  it("active falls back to first guideline when all invalid", () => {
+    const raw = {
+      enabled: true,
+      active: ["missing"],
+      guidelines: { a: "1", b: "2" },
+    };
+    const result = buildProjectConfig(raw)!;
+    assert.deepStrictEqual(result.active, ["a"]);
   });
 
   it("does not include built-ins", () => {
     const raw = {
       enabled: true,
-      active: "test",
+      active: ["test"],
       guidelines: { test: "only me" },
     };
     const result = buildProjectConfig(raw)!;
