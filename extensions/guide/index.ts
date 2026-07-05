@@ -815,4 +815,36 @@ export default function (pi: ExtensionAPI) {
       );
     },
   });
+
+  // -----------------------------------------------------------------------
+  // /guide:show  —  display currently injected guideline text
+  // -----------------------------------------------------------------------
+  pi.registerCommand("guide:show", {
+    description: "Show the current active guideline text being injected into the system prompt",
+    handler: async (_args, ctx) => {
+      const cfg = activeConfig();
+      if (!cfg) {
+        ctx.ui.notify("No guidelines currently active. Use /guide:use to enable some.", "warning");
+        return;
+      }
+
+      const texts = cfg.active.map((n) => cfg.guidelines[n]).filter(Boolean);
+      if (texts.length === 0) {
+        ctx.ui.notify("No guidelines currently active.", "warning");
+        return;
+      }
+
+      const scopeLabel = activeScope === "project" ? "project" : "global";
+      const header = `# Active Guidelines (${scopeLabel} scope)\n\n${cfg.active.length} guideline(s): ${cfg.active.join(", ")}\n`;
+      const body = texts
+        .map((t, i) => `### Guideline ${i + 1}: ${cfg.active[i]}\n\n${t}`)
+        .join("\n\n---\n\n");
+
+      await ctx.ui.editor(
+        `Current active guidelines (${scopeLabel} — view only):`,
+        `${header}\n---\n\n${body}`,
+      );
+      // ponytail: discard editor result — view-only display
+    },
+  });
 }
