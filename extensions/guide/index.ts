@@ -19,7 +19,6 @@
  */
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Markdown } from "@earendil-works/pi-tui";
 import { readFileSync, writeFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
 import { resolve, dirname, join, extname } from "node:path";
 import { homedir } from "node:os";
@@ -841,18 +840,11 @@ export default function (pi: ExtensionAPI) {
         .map((t, i) => `### Guideline ${i + 1}: ${cfg.active[i]}\n\n${t}`)
         .join("\n\n---\n\n");
 
-      const { getMarkdownTheme } = await import("@earendil-works/pi-coding-agent");
-      const mdContent = `${header}\n---\n\n${body}`;
-      await ctx.ui.custom((_tui, _theme, _kb, done) => {
-        const md = new Markdown(mdContent, 1, 1, getMarkdownTheme());
-        return {
-          render: (w) => md.render(w),
-          invalidate: () => md.invalidate(),
-          handleInput: (data) => {
-            if (data === "\x1b") done(undefined);
-          },
-        };
-      });
+      await ctx.ui.editor(
+        `Current active guidelines (${scopeLabel} — view only):`,
+        `${header}\n---\n\n${body}`,
+      );
+      // ponytail: discard editor result — view-only display
     },
   });
 }
