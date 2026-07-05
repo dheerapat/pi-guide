@@ -845,6 +845,7 @@ export default function (pi: ExtensionAPI) {
         `${header}\n---\n\n${body}`,
       );
       // ponytail: discard editor result — view-only display
+      ctx.ui.notify("Read-only — no data was saved.", "info");
     },
   });
 }
