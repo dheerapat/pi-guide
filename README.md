@@ -48,7 +48,7 @@ To reorder: toggle everything off, back on in desired sequence. Or edit `active`
 
 **Priority:** project scope wins if enabled. Else global. Else off.
 
-Built-ins (`ponytail`, `caveman`, `pirate`, `andrej`) are shipped as `.md` files —
+Built-ins (`ponytail`, `caveman`, `pirate`, `andrej`, `adhd`, `ste`) are shipped as `.md` files —
 cannot edit/delete, but user guideline with same name overrides. Global scope only.
 
 ## How it works
